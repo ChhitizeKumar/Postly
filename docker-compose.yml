@@ -1,0 +1,245 @@
+
+
+# ================================================================
+# Postly — Step 1: Infrastructure Only
+# Boots: PostgreSQL, MongoDB, Redis, Kafka, ClickHouse, MinIO
+#
+# Start:  docker compose up -d
+# Stop:   docker compose down
+# Reset:  docker compose down -v   (deletes all data)
+# Logs:   docker compose logs -f [service-name]
+# ================================================================
+
+networks:
+  postly:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  mongo_data:
+  redis_data:
+  kafka_data:
+  zookeeper_data:
+  clickhouse_data:
+  minio_data:
+
+services:
+
+  # --------------------------------------------------------------
+  # PostgreSQL — used by: Auth Service, User Service, AI Service
+  # Image includes pgvector extension (for RAG embeddings later)
+  # --------------------------------------------------------------
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: postly-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postly
+      POSTGRES_PASSWORD: postly_secret
+      POSTGRES_DB: postly
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - postly
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postly -d postly"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # --------------------------------------------------------------
+  # MongoDB — used by: Content Service (posts, comments, tags)
+  # --------------------------------------------------------------
+  mongodb:
+    image: mongo:7.0
+    container_name: postly-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: postly
+      MONGO_INITDB_ROOT_PASSWORD: postly_secret
+      MONGO_INITDB_DATABASE: postly_content
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+      - ./infrastructure/mongo/init.js:/docker-entrypoint-initdb.d/init.js:ro
+    networks:
+      - postly
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/postly_content --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # --------------------------------------------------------------
+  # Redis — used by: all services (cache, sessions, rate limiting)
+  # --------------------------------------------------------------
+  redis:
+    image: redis:7.2-alpine
+    container_name: postly-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass postly_secret
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - postly
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "postly_secret", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # --------------------------------------------------------------
+  # Zookeeper — required by Kafka
+  # --------------------------------------------------------------
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: postly-zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+    networks:
+      - postly
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo srvr | nc localhost 2181"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
+
+  # --------------------------------------------------------------
+  # Kafka — event bus for all inter-service communication
+  # PLAINTEXT_HOST allows your local Spring Boot apps to connect
+  # --------------------------------------------------------------
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: postly-kafka
+    restart: unless-stopped
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      # Two listeners: one for Docker network, one for your laptop
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 48
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks:
+      - postly
+    healthcheck:
+      test: kafka-broker-api-versions --bootstrap-server localhost:9092
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  # --------------------------------------------------------------
+  # Kafka Topic Setup — runs once, creates all topics we need
+  # --------------------------------------------------------------
+  kafka-setup:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: postly-kafka-setup
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - postly
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      "
+      echo 'Creating Kafka topics...'
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic user-events       --partitions 3 --replication-factor 1
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic post-events       --partitions 3 --replication-factor 1
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic notification-events --partitions 3 --replication-factor 1
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic ai-job-requests   --partitions 3 --replication-factor 1
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic ai-job-results    --partitions 3 --replication-factor 1
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic audit-log         --partitions 1 --replication-factor 1
+      echo ''
+      echo 'Topics created:'
+      kafka-topics --bootstrap-server kafka:29092 --list
+      "
+
+  # --------------------------------------------------------------
+  # Kafka UI — visual browser for topics and messages
+  # Open: http://localhost:8090
+  # --------------------------------------------------------------
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: postly-kafka-ui
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: postly-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+    ports:
+      - "8090:8080"
+    networks:
+      - postly
+
+  # --------------------------------------------------------------
+  # ClickHouse — analytics DB (used by Analytics Service later)
+  # --------------------------------------------------------------
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.12
+    container_name: postly-clickhouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: postly_analytics
+      CLICKHOUSE_USER: postly
+      CLICKHOUSE_PASSWORD: postly_secret
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./infrastructure/clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - postly
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # --------------------------------------------------------------
+  # MinIO — local S3 for file uploads (avatars, doc uploads)
+  # Console: http://localhost:9001  (postly / postly_secret)
+  # --------------------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    container_name: postly-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: postly
+      MINIO_ROOT_PASSWORD: postly_secret
+    ports:
+      - "9001:9001"   # Console UI
+      - "9002:9000"   # S3 API
+    volumes:
+      - minio_data:/data
+    networks:
+      - postly

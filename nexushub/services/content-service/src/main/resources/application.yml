@@ -1,0 +1,91 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: content-service
+
+  # MongoDB
+  data:
+    mongodb:
+      uri: mongodb://nexushub:nexushub_secret@localhost:27017/nexushub_content?authSource=admin
+      auto-index-creation: false  # indexes created in init.js
+
+    redis:
+      host: localhost
+      port: 6379
+      password: nexushub_secret
+
+  # Kafka
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 3
+    consumer:
+      group-id: content-service-group
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "com.nexushub.*"
+
+# Cache TTLs
+cache:
+  posts:
+    ttl: 300          # 5 minutes
+  tags:
+    ttl: 3600         # 1 hour
+  feed:
+    ttl: 60           # 1 minute
+
+# Pagination defaults
+pagination:
+  default-page-size: 20
+  max-page-size: 100
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+  instance:
+    prefer-ip-address: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, prometheus
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+  tracing:
+    sampling:
+      probability: 1.0
+
+logging:
+  level:
+    com.nexushub: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level [traceId=%X{traceId}] %logger{36} - %msg%n"
+
+---
+spring:
+  config:
+    activate:
+      on-profile: docker
+  data:
+    mongodb:
+      uri: mongodb://nexushub:nexushub_secret@mongodb:27017/nexushub_content?authSource=admin
+    redis:
+      host: redis
+  kafka:
+    bootstrap-servers: kafka:29092
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://eureka-server:8761/eureka/
