@@ -1,0 +1,74 @@
+# Maven
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.bak
+release.properties
+.flattened-pom.xml
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+.DS_Store
+*.swp
+*.swo
+*~
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.Windows-*
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Build and runtime
+build/
+*.jar
+!*.jar.original
+dist/
+*.class
+*.exe
+
+# Dependencies
+.m2/
+node_modules/
+
+# Docker
+.dockerignore
+docker.log
+*.pem
+.env
+.env.local
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Database dumps
+*.sql.gz
+*.dump
+
+# System
+.gradle/
+.venv/
+.pytest_cache/

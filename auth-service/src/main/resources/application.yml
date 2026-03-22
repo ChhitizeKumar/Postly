@@ -7,7 +7,7 @@ spring:
 
   # PostgreSQL
   datasource:
-    url: jdbc:postgresql://localhost:5432/postly_auth
+    url: jdbc:postgresql://localhost:5433/postly_auth
     username: postly
     password: postly_secret
     hikari:
@@ -42,7 +42,7 @@ spring:
 
 # JWT settings
 jwt:
-  secret: postly_super_secret_jwt_key_must_be_at_least_256_bits_long_change_in_prod
+  secret: postly_jwt_secret_key_for_development_must_be_at_least_256_bits_long
   access-token-expiry-ms: 900000      # 15 minutes
   refresh-token-expiry-ms: 604800000  # 7 days
 

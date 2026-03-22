@@ -38,7 +38,7 @@ services:
       POSTGRES_PASSWORD: postly_secret
       POSTGRES_DB: postly
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./infrastructure/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro

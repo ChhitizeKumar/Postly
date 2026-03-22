@@ -56,6 +56,7 @@ public class AuthService {
         User user = User.builder()
                 .email(request.getEmail())
                 .passwordHash(passwordEncoder.encode(request.getPassword()))
+                .userName(request.getUsername())
                 .provider(User.AuthProvider.LOCAL)
                 .role(User.Role.USER)
                 .emailVerified(false)
@@ -158,6 +159,7 @@ public class AuthService {
         return UserResponse.builder()
                 .id(user.getId().toString())
                 .email(user.getEmail())
+                .username(user.getUserName())
                 .role(user.getRole().name())
                 .emailVerified(user.getEmailVerified())
                 .build();
@@ -180,6 +182,7 @@ public class AuthService {
                 .user(UserResponse.builder()
                         .id(user.getId().toString())
                         .email(user.getEmail())
+                        .username(user.getUserName())
                         .role(user.getRole().name())
                         .emailVerified(user.getEmailVerified())
                         .build())
